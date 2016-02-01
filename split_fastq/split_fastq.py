@@ -20,7 +20,14 @@ Requirements
 
 Known Issues
 ------------
-- None
+- If (num_buffer < MIN_SPILLOVER * num_reads) and there aren't enough reads
+  to create a new chunk, reads will be flushed to disk to the new
+  chunk, but then some reads will be appended to the previous
+  chunk. Current fix is to take min(num_buffer, MIN_SPILLOVER * num_reads)
+  as the threshold for creating a new chunk. However, I prefer to avoid
+  this complexity altogether and set MIN_SPILLOVER to 0 and simply split
+  FASTQ files in chunks of num_reads and not care about the last one being
+  impractically small.
 """
 
 import argparse
@@ -29,12 +36,12 @@ import shutil
 import logging
 import cancer_api
 
-__version__ = "v1.1.4"
+__version__ = "v1.1.5"
 
 # MIN_SPILLOVER indicates the minimum fraction (between 0 and 1) of num_reads
 # that is required to create a new chunk. This is mostly meant to prevent the
 # creation of small FASTQ files with only very few reads.
-MIN_SPILLOVER = 0.25
+MIN_SPILLOVER = 0
 
 
 def main():
@@ -123,6 +130,7 @@ def main():
         # Setup
         infastq = cancer_api.files.FastqFile.open(fastq_filepath)
         current_chunk = Chunk(infastq, output_dir, no_compression)
+        min_threshold = min(num_buffer, MIN_SPILLOVER * num_reads)
         intervals = []
         num_accum = 0
 
@@ -141,7 +149,8 @@ def main():
                 current_chunk.outfastq.write()
                 intervals.append(str(current_chunk.chunk_name()))
                 current_chunk.next()
-                num_accum = 0
+                current_chunk.outfastq.add_obj(read)
+                num_accum = 1
 
         # Handle remaining reads
         # If the current_chunk is still at chunk1, just symlink
@@ -154,7 +163,7 @@ def main():
                 os.symlink(src, dst)
             intervals.append(str(current_chunk.chunk_name()))
         # Check if the number of remaining reads is above the MIN_SPILLOVER
-        elif len(current_chunk.outfastq.storelist) >= MIN_SPILLOVER * num_reads:
+        elif len(current_chunk.outfastq.storelist) >= min_threshold:
             # If so, write out reads to current chunk
             logging.info("Writing out chunk #{}".format(current_chunk.counter))
             current_chunk.outfastq.write()
@@ -167,6 +176,7 @@ def main():
                 current_chunk.outfastq.add_obj(read)
             logging.info("Writing out chunk #{}".format(current_chunk.counter))
             current_chunk.outfastq.write()
+            intervals.append(str(current_chunk.chunk_name()))
 
         # Return intervals
         return intervals
