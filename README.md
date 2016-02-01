@@ -22,3 +22,4 @@ git clone git@github.com:morinlab/lab_scripts.git
 cd lab_scripts
 git checkout -b tags/1.1 tags/1.1
 ```
+# lab_scripts
